@@ -1,25 +1,35 @@
-launcher = "/absolute/path/to/qualified-launcher"
+mode = "native"
 
 [routes]
 openai = ["gemini-agy", "claude-agy"]
+gemini = ["openai-codex", "claude-agy"]
+claude = ["openai-codex", "gemini-agy"]
 
 [approved_services]
-"/absolute/path/to/approved/repo" = ["antigravity"]
+# Uncomment only after you approve the repository for the route's services.
+# "/absolute/path/to/approved/repo" = ["antigravity", "openai"]
 
+# Example versions and model IDs. Pin the values from your local synthetic test.
 [reviewers.gemini-agy]
 adapter = "agy"
 service = "antigravity"
 family = "gemini"
-model = "PIN_VERIFIED_GEMINI_MODEL"
+model = "gemini-4-argon-medium"
 binary = "/absolute/path/to/agy"
-version = "PIN_VERIFIED_VERSION"
-profile = "review-gemini"
+version = "1.5.0"
 
 [reviewers.claude-agy]
 adapter = "agy"
 service = "antigravity"
 family = "claude"
-model = "PIN_VERIFIED_CLAUDE_MODEL"
+model = "claude-sonnet-5-5-medium"
 binary = "/absolute/path/to/agy"
-version = "PIN_VERIFIED_VERSION"
-profile = "review-claude"
+version = "1.5.0"
+
+[reviewers.openai-codex]
+adapter = "codex"
+service = "openai"
+family = "openai"
+model = "gpt-6.1-sol"
+binary = "/absolute/path/to/codex"
+version = "0.166.0"

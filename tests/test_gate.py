@@ -116,9 +116,12 @@ def test_snapshot_rejects_capture_race(repo, monkeypatch):
 
 
 @pytest.fixture
-def launch(tmp_path):
+def launch(tmp_path, monkeypatch):
     root = tmp_path.resolve()
-    fake = root / "launcher"
+    home = root / "user-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    fake = root / "reviewer"
     fake.write_text(f"#!{sys.executable}\n" + '''
 import hashlib
 import json
@@ -129,7 +132,15 @@ import time
 if sys.argv[-1] == "--version":
     print("fake 1.0")
     raise SystemExit
-profile = sys.argv[1]
+import os
+
+profile = sys.argv[sys.argv.index("--model") + 1]
+assert Path.home() == Path(__file__).parent / "user-home"
+assert Path.cwd() != Path.home()
+assert os.environ["AGY_CLI_DISABLE_AUTO_UPDATE"] == "true"
+assert Path(sys.argv[sys.argv.index("--log-file") + 1]).parent.resolve() == Path.cwd()
+settings = json.loads(sys.argv[sys.argv.index("--settings") + 1])
+assert "command(*)" in settings["permissions"]["deny"]
 packet = sys.stdin.buffer.read()
 peers = Path(__file__).parent
 (peers / (profile + ".ready")).touch()
@@ -157,7 +168,7 @@ print(json.dumps({"event": "result", "result": result}))
 def configure(repo, launch, second):
     config = launch.with_name("config.toml")
     config.write_text(f'''
-launcher = {json.dumps(str(launch))}
+mode = "native"
 [routes]
 openai = ["a", "b"]
 [approved_services]
@@ -166,18 +177,16 @@ openai = ["a", "b"]
 adapter = "agy"
 service = "antigravity"
 family = "gemini"
-model = "gemini-test"
-binary = "/unused/agy"
+model = "first"
+binary = {json.dumps(str(launch))}
 version = "1.0"
-profile = "first"
 [reviewers.b]
 adapter = "agy"
 service = "antigravity"
 family = "claude"
-model = "claude-test"
-binary = "/unused/agy"
+model = {json.dumps(second)}
+binary = {json.dumps(str(launch))}
 version = "1.0"
-profile = {json.dumps(second)}
 ''')
     return config
 

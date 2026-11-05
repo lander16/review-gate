@@ -36,7 +36,7 @@ def write_report(parent, root, packet, packet_hash, reviewers, results, code, er
     omissions = [{"path": change["path"], "reason": change["omitted"],
                   "base": change["base"], "worktree": change["worktree"]}
                  for change in packet.get("changes", []) if "omitted" in change]
-    report = {"version": 1, "phase": packet.get("phase"), "base": packet.get("base"),
+    report = {"version": 1, "mode": "native", "phase": packet.get("phase"), "base": packet.get("base"),
               "packet_sha256": packet_hash, "exit_code": code, "error": error,
               "omissions": omissions, "reviewers": [
                   info | result for info, result in zip(public, results)

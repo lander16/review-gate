@@ -38,9 +38,9 @@ def main(argv=None):
     try:
         root, packet, packet_bytes = capture(args, root)
         packet_hash = digest(packet_bytes)
-        launcher, reviewers = load(args.config, root, args.primary_family or PRIMARY[args.primary])
+        reviewers = load(args.config, root, args.primary_family or PRIMARY[args.primary])
         private_directory(args.reports, root)
-        results = review(launcher, reviewers, packet, packet_bytes)
+        results = review(reviewers, packet, packet_bytes)
         code = exit_code(results)
         if code == 0 and any(item.get("masked_staged") for item in packet.get("changes", [])):
             code = 1

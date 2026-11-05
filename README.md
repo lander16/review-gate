@@ -43,18 +43,18 @@ Check for an existing copy before replacing it. Start a new agent session if the
 
 Open the checkout in your coding agent and give it this prompt:
 
-> Set up Review Gate for my current coding harness. Follow [SETUP.md](SETUP.md), install the skill at the scope I choose, and draft my private reviewer configuration. Use synthetic inputs for verification and tell me which sign-ins, isolation checks, or provider approvals are still needed.
+> Set up Review Gate for my current coding harness. Follow [SETUP.md](SETUP.md), install the skill at the scope I choose, and configure my native reviewers. Use synthetic inputs for verification and tell me which sign-ins or provider approvals are still needed.
 
 ## Configure live reviewers
 
-Live review requires a separately qualified isolation launcher. The project currently supplies the launch protocol and offline tests. Qualify the launcher and each model route with synthetic data before allowing real repository content. The macOS provider auth and network boundary still need end-to-end verification.
+Review Gate calls your installed CLI binaries directly. Set `mode = "native"` in `~/.config/review-gate/config.toml` and start with [config.example.toml](config.example.toml). If you used the initial config template, remove its `launcher` and reviewer `profile` fields. Each route requires two reviewer families distinct from each other and from the primary.
 
-The launcher protocol is `LAUNCHER PROFILE -- BINARY ARGS...`. It must enforce a filesystem allowlist and provider-only egress, run with dedicated authentication and state, exclude user and project instructions, disable extensions and model tools, propagate exit status, and keep the reviewer and descendants under the same boundary and lifecycle. It must handle both version probes and reviews, preserve stdin and stdout, and allow the process only its designated scratch directory, required runtime, and dedicated profile. A shell forwarding wrapper is unsuitable for live review. Verify the boundary using independent negative probes for reads, writes, and network access.
+For a Codex primary, sign in to Antigravity once and use two explicit `agy` models, one Gemini and one Claude. Run `agy models` to find the model IDs available to your account. The example routes both reviewers through Antigravity. Installing Claude Code is optional.
 
-The external TOML configuration defaults to `~/.config/review-gate/config.toml`. Pin known model IDs and the exact qualified CLI version token. Profiles are assigned and provisioned by the launcher. Each route requires two distinct reviewer families and distinct state profiles.
+Native mode starts each review in a fresh working directory and applies the configured CLI tool controls. Antigravity and Claude Code use the normal login and OS keychain. Antigravity can load user-level configuration and write session state in its usual directories. Review Gate supplies per-run deny rules for file tools, shell commands, URLs, and MCP calls. Codex and OpenCode use temporary homes with copies of their standard local credential files. Sign in with the standard CLI profile first. Account, CLI version, and model availability can vary. Run a synthetic review after configuring or updating a route.
 
-Start with [config.example.toml](config.example.toml).
+Native mode relies on each CLI's restrictions and does not provide an OS-level filesystem or network allowlist. Use it with trusted binaries and repositories you explicitly approve for the selected services. Keep the config and reports outside the reviewed repository. The optional stronger isolation design is tracked in [issue #1](https://github.com/lander16/review-gate/issues/1).
 
-Use `codex`, `agy`, `claude`, or `opencode` for the adapter. OpenCode profiles pin an `opencode-go/<model-id>`. The service names track the destination receiving the packet. Family describes underlying model lineage. Approve every destination explicitly for the repo. Keep the configuration and reports outside the repo. Treat both reports and provider session state as sensitive and remove them according to your retention policy.
+Use `codex`, `agy`, `claude`, or `opencode` for the adapter. OpenCode profiles pin an `opencode-go/<model-id>`. The service names track the destination receiving the packet. Family describes underlying model lineage. Approve each service under `approved_services` before sending repository content.
 
 Exit 0 means two valid responses without reported blockers. Exit 1 means a reported blocker, material limitation, or masked staged change. Exit 2 means the review could not complete safely or validly. The report retains any valid partial reviewer result and records omissions. Compare the resolved base against the effective worktree, including untracked source. Inspect material omitted binaries and lockfiles separately.

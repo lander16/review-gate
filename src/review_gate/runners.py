@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import selectors
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -36,9 +37,10 @@ def stop(process):
     process.wait()
 
 
-def run_process(argv, payload, cwd, timeout=TIMEOUT, cancelled=None):
+def run_process(argv, payload, cwd, timeout=TIMEOUT, cancelled=None, extra_env=None):
     deadline = time.monotonic() + timeout
     env = {"PATH": os.defpath, "LANG": "en_US.UTF-8", "TMPDIR": str(cwd)}
+    env.update(extra_env or {})
     with tempfile.TemporaryFile(dir=cwd) as prompt:
         prompt.write(payload)
         prompt.seek(0)
@@ -91,11 +93,21 @@ def command(reviewer, prompt, directory):
                 "-"], prompt, output
     if reviewer.adapter == "agy":
         message = {"event": "user", "message": {"content": prompt.decode()}}
-        return ["--disable-slash-commands", "--model", model, "--input-format",
+        settings = {
+            "allowNonWorkspaceAccess": False,
+            "toolPermission": "request-review",
+            "permissions": {"allow": [], "deny": [
+                "command(*)", "read_file(*)", "write_file(*)", "mcp(*)",
+                "read_url(*)", "execute_url(*)",
+            ]},
+        }
+        return ["--settings", json.dumps(settings), "--disable-slash-commands",
+                "--log-file", str(directory / "agy.log"), "--model", model, "--input-format",
                 "stream-json", "--output-format", "stream-json",
                 "--json-schema", SCHEMA], (json.dumps(message) + "\n").encode(), None
     if reviewer.adapter == "claude":
-        return ["-p", "--safe-mode", "--tools", "", "--no-session-persistence",
+        return ["-p", "--safe-mode", "--tools", "", "--disallowedTools", "mcp__*",
+                "--no-session-persistence",
                 "--output-format", "json", "--json-schema", SCHEMA,
                 "--model", model], prompt, None
     return ["run", "--model", model, "--format", "json"], prompt, None
@@ -185,24 +197,63 @@ def validate(payload, anchors):
             raise GateError("Reviewer cited evidence outside the packet")
 
 
-def invocation(launcher, reviewer, args):
-    return [launcher, reviewer.profile, "--", reviewer.binary, *args]
+AUTH_FILES = {
+    "codex": (".codex/auth.json",),
+    "opencode": (".local/share/opencode/auth.json",),
+}
 
 
-def preflight(launcher, reviewer, directory):
-    stdout, stderr = run_process(invocation(launcher, reviewer, ["--version"]),
-                                 b"", directory, timeout=15)
+def reviewer_environment(reviewer, home):
+    user_home = Path.home()
+    env = {
+        "HOME": str(home),
+        "PATH": str(Path(reviewer.binary).parent) + os.pathsep + os.defpath,
+    }
+    if reviewer.adapter == "agy":
+        # Antigravity uses the system keychain when it refreshes the session.
+        return env | {"HOME": str(user_home), "AGY_CLI_DISABLE_AUTO_UPDATE": "true"}
+    if reviewer.adapter == "claude":
+        return env | {"HOME": str(user_home)}
+    for relative in AUTH_FILES[reviewer.adapter]:
+        source = user_home / relative
+        if not source.is_file():
+            raise GateError(f"Sign in to {reviewer.adapter} before using this reviewer")
+        destination = home / relative
+        destination.parent.mkdir(mode=0o700, parents=True)
+        fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "wb") as target, source.open("rb") as original:
+            shutil.copyfileobj(original, target)
+    if reviewer.adapter == "codex":
+        env["CODEX_HOME"] = str(home / ".codex")
+    else:
+        env.update(
+            XDG_DATA_HOME=str(home / ".local/share"),
+            XDG_CONFIG_HOME=str(home / ".config"),
+            XDG_CACHE_HOME=str(home / ".cache"),
+            XDG_STATE_HOME=str(home / ".local/state"),
+            OPENCODE_PURE="1",
+            OPENCODE_DISABLE_AUTOUPDATE="1",
+            OPENCODE_DISABLE_PROJECT_CONFIG="1",
+            OPENCODE_DISABLE_EXTERNAL_SKILLS="1",
+            OPENCODE_CONFIG_CONTENT=json.dumps({"permission": {"*": "deny"}}),
+        )
+    return env
+
+
+def preflight(reviewer, directory):
+    stdout, stderr = run_process([reviewer.binary, "--version"], b"", directory,
+                                 timeout=15, extra_env={"HOME": str(directory)})
     if reviewer.version not in (stdout + stderr).decode(errors="replace").split():
         raise GateError(f"Unqualified CLI version for reviewer {reviewer.name}")
 
 
-def review_one(launcher, reviewer, packet_bytes, anchors, directory, cancelled):
+def review_one(reviewer, packet_bytes, anchors, directory, env, cancelled):
     started = time.monotonic()
     try:
         prompt = INSTRUCTIONS.encode() + packet_bytes + b"\nEND REVIEW PACKET\n"
         args, payload, final_path = command(reviewer, prompt, directory)
-        stdout, stderr = run_process(invocation(launcher, reviewer, args), payload,
-                                     directory, cancelled=cancelled)
+        stdout, stderr = run_process([reviewer.binary, *args], payload,
+                                     directory, cancelled=cancelled, extra_env=env)
         result, reported = normalize(reviewer.adapter, stdout, final_path)
         if reported is not None and reported != reviewer.model:
             raise GateError("Reviewer reported an unexpected model")
@@ -216,7 +267,7 @@ def review_one(launcher, reviewer, packet_bytes, anchors, directory, cancelled):
     return {"status": "error", "reason": reason, "seconds": round(time.monotonic() - started, 3)}
 
 
-def review(launcher, reviewers, packet, packet_bytes):
+def review(reviewers, packet, packet_bytes):
     from threading import Event
     cancelled = Event()
     anchors = visible_lines(packet)
@@ -224,11 +275,16 @@ def review(launcher, reviewers, packet, packet_bytes):
         directories = [Path(temporary) / str(index) for index in range(len(reviewers))]
         for reviewer, directory in zip(reviewers, directories):
             directory.mkdir(mode=0o700)
-            preflight(launcher, reviewer, directory)
+            preflight(reviewer, directory)
+        environments = []
+        for reviewer, directory in zip(reviewers, directories):
+            home = directory / "home"
+            home.mkdir(mode=0o700)
+            environments.append(reviewer_environment(reviewer, home))
         with ThreadPoolExecutor(max_workers=len(reviewers)) as executor:
-            futures = [executor.submit(review_one, launcher, reviewer, packet_bytes,
-                                       anchors, directory, cancelled)
-                       for reviewer, directory in zip(reviewers, directories)]
+            futures = [executor.submit(review_one, reviewer, packet_bytes,
+                                       anchors, directory, env, cancelled)
+                       for reviewer, directory, env in zip(reviewers, directories, environments)]
             try:
                 return [future.result() for future in futures]
             except KeyboardInterrupt:

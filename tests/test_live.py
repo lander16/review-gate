@@ -11,8 +11,8 @@ from review_gate.runners import review
 pytestmark = pytest.mark.live
 
 
-@pytest.mark.skipif(os.environ.get("REVIEW_GATE_LIVE") != "1", reason="requires qualified profiles")
-@pytest.mark.parametrize("family", ["openai", "gemini"])
+@pytest.mark.skipif(os.environ.get("REVIEW_GATE_LIVE") != "1", reason="requires signed-in reviewer CLIs")
+@pytest.mark.parametrize("family", os.environ.get("REVIEW_GATE_LIVE_FAMILIES", "openai").split(","))
 def test_live_default_routes(tmp_path, family):
     config = Path(os.environ["REVIEW_GATE_LIVE_CONFIG"])
     # The user explicitly approves this root key and both services in the smoke config.
@@ -25,6 +25,6 @@ def test_live_default_routes(tmp_path, family):
             {"path": "plan", "side": "plan", "text": "Return the sum and test signed inputs.\n"},
         ],
     }
-    launcher, reviewers = load(config, root, family)
-    results = review(launcher, reviewers, packet, json.dumps(packet).encode())
+    reviewers = load(config, root, family)
+    results = review(reviewers, packet, json.dumps(packet).encode())
     assert [result["status"] for result in results] == ["ok", "ok"], results
