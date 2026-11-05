@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import subprocess
 import tempfile
 
 import tomlkit
@@ -35,37 +36,54 @@ def save(path, config):
             temporary.unlink(missing_ok=True)
 
 
-def add_route(config, family, root):
-    names = []
+def detect(adapter, root):
+    found = shutil.which(adapter)
+    if not found:
+        raise GateError(f"Install {adapter} or configure a custom reviewer route")
+    binary = Path(found).absolute()
+    if binary.resolve().is_relative_to(root):
+        raise GateError(f"The {adapter} executable must be outside the reviewed repository")
+    with tempfile.TemporaryDirectory(prefix="review-gate-setup-") as temporary:
+        directory = Path(temporary)
+        stdout, stderr = run_process([str(binary), "--version"], b"", directory,
+                                     timeout=15, extra_env={"HOME": temporary})
+    version = next((token for token in (stdout + stderr).decode(errors="replace").split()
+                    if VERSION.fullmatch(token)), None)
+    if version is None:
+        raise GateError(f"Could not detect the installed {adapter} version")
+    return str(binary), version
+
+
+def discover_reviewers(config, family, root):
+    available = []
+    failures = {}
     versions = {}
-    candidates = [other for other in DEFAULT_MODELS if other != family.casefold()]
-    for other in candidates[:2]:
-        adapter, service, model = DEFAULT_MODELS[other]
-        name = f"{other}-{adapter}"
-        names.append(name)
-        reviewers = config.setdefault("reviewers", {})
-        if name in reviewers:
+    reviewers = config.setdefault("reviewers", {})
+    for other, (adapter, service, model) in DEFAULT_MODELS.items():
+        if other == family.casefold():
             continue
-        if adapter not in versions:
-            binary = shutil.which(adapter)
-            if not binary:
-                raise GateError(f"Install {adapter} or configure a custom reviewer route")
-            binary = Path(binary).absolute()
-            if binary.resolve().is_relative_to(root):
-                raise GateError(f"The {adapter} executable must be outside the reviewed repository")
-            with tempfile.TemporaryDirectory(prefix="review-gate-setup-") as temporary:
-                directory = Path(temporary)
-                stdout, stderr = run_process([str(binary), "--version"], b"", directory,
-                                             timeout=15, extra_env={"HOME": temporary})
-            version = next((token for token in (stdout + stderr).decode(errors="replace").split()
-                            if VERSION.fullmatch(token)), None)
-            if version is None:
-                raise GateError(f"Could not detect the installed {adapter} version")
-            versions[adapter] = str(binary), version
-        binary, version = versions[adapter]
-        reviewers[name] = dict(adapter=adapter, service=service, family=other,
-                               model=model, binary=binary, version=version)
-    config["routes"][family] = names
+        name = f"{other}-{adapter}"
+        if name not in reviewers:
+            if adapter in failures:
+                continue
+            if adapter not in versions:
+                try:
+                    versions[adapter] = detect(adapter, root)
+                except GateError as exc:
+                    failures[adapter] = str(exc)
+                    continue
+                except (OSError, subprocess.TimeoutExpired):
+                    failures[adapter] = f"Could not run {adapter} --version"
+                    continue
+            binary, version = versions[adapter]
+            reviewers[name] = dict(adapter=adapter, service=service, family=other,
+                                   model=model, binary=binary, version=version)
+        available.append(name)
+        if len(available) == 2:
+            break
+    if not available:
+        raise GateError("No eligible reviewer found. " + ". ".join(failures.values()))
+    config["routes"].setdefault(family, available[:1])
 
 
 def configure(args, cwd):
@@ -87,13 +105,29 @@ def configure(args, cwd):
             raise GateError("Choose your coding harness with --primary on first setup")
         family = primary_family(config, primary, args.primary_family)
         routes = config.setdefault("routes", {})
-        if family not in routes:
-            add_route(config, family, root)
+        route = routes.get(family)
+        built_in_names = {f"{other}-{adapter}" for other, (adapter, _, _) in DEFAULT_MODELS.items()}
+        if family not in routes or (
+            isinstance(route, list) and len(route) == 1 and isinstance(route[0], str) and route[0] in built_in_names
+        ):
+            discover_reviewers(config, family, root)
         pairs = {phase: route_reviewers(config, root, family, phase) for phase in PHASES}
         required = {reviewer.service for pair in pairs.values() for reviewer in pair}
         allowed = set(args.allow)
-        if allowed and allowed != required:
-            raise GateError(f"Pass --allow for exactly these services: {', '.join(sorted(required))}")
+        default_names = {reviewer.name for pair in pairs.values() for reviewer in pair}
+        alternatives = []
+        for name in config["reviewers"]:
+            if name in default_names:
+                continue
+            try:
+                alternatives.extend(route_reviewers(config, root, family, names=[name]))
+            except GateError:
+                continue
+        available_services = required | {reviewer.service for reviewer in alternatives}
+        if allowed and not required.issubset(allowed):
+            raise GateError(f"Pass --allow for at least these services: {', '.join(sorted(required))}")
+        if not allowed.issubset(available_services):
+            raise GateError(f"No eligible reviewer profile for: {', '.join(sorted(allowed - available_services))}")
         config["default_primary"] = primary
         config["default_primary_family"] = family
         approvals = config.setdefault("approved_services", {})
@@ -108,6 +142,8 @@ def configure(args, cwd):
         for reviewer in pair:
             print(f"  {reviewer.name}: {reviewer.model} via {reviewer.service} "
                   f"({reviewer.adapter} {reviewer.version})")
+    for reviewer in alternatives:
+        print(f"Optional reviewer {reviewer.name}: {reviewer.model} via {reviewer.service}")
     print(f"Saved {path}")
     if not required.issubset(approved):
         flags = [flag for service in sorted(required) for flag in ("--allow", service)]

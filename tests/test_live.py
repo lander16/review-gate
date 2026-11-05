@@ -15,7 +15,7 @@ pytestmark = pytest.mark.live
 @pytest.mark.parametrize("family", os.environ.get("REVIEW_GATE_LIVE_FAMILIES", "openai").split(","))
 def test_live_default_routes(tmp_path, family):
     config = Path(os.environ["REVIEW_GATE_LIVE_CONFIG"])
-    # The user explicitly approves this root key and both services in the smoke config.
+    # The user explicitly approves this root key and the selected services in the smoke config.
     root = Path(os.environ["REVIEW_GATE_LIVE_ROOT"]).resolve()
     packet = {
         "version": 1,
@@ -27,4 +27,4 @@ def test_live_default_routes(tmp_path, family):
     }
     reviewers = load(config, root, family)
     results = review(reviewers, packet, json.dumps(packet).encode())
-    assert [result["status"] for result in results] == ["ok", "ok"], results
+    assert [result["status"] for result in results] == ["ok"] * len(reviewers), results

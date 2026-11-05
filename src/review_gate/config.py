@@ -52,8 +52,8 @@ def route_reviewers(config, root, family, phase="plan", *, names=None):
                 names = route[phase]
             else:
                 names = route
-        if not isinstance(names, list) or len(names) != 2:
-            raise GateError("Choose exactly two reviewer profiles")
+        if not isinstance(names, list) or len(names) not in (1, 2):
+            raise GateError("Choose one or two reviewer profiles")
         if config.get("mode") != "native" or "launcher" in config:
             raise GateError("Set mode = 'native' and remove legacy launcher and profile fields")
         reviewers = [Reviewer(name, **config["reviewers"][name]) for name in names]
@@ -68,8 +68,8 @@ def route_reviewers(config, root, family, phase="plan", *, names=None):
                 raise GateError("Invalid reviewer configuration")
             if reviewer.adapter == "opencode" and not reviewer.model.startswith("opencode-go/"):
                 raise GateError("OpenCode profiles must pin an OpenCode Go model")
-        if len({family.casefold(), *(reviewer.family.casefold() for reviewer in reviewers)}) != 3:
-            raise GateError("The primary and both reviewers must use distinct model families")
+        if len({family.casefold(), *(reviewer.family.casefold() for reviewer in reviewers)}) != len(reviewers) + 1:
+            raise GateError("The primary and each reviewer must use distinct model families")
         return reviewers
     except (KeyError, TypeError, AttributeError) as exc:
         raise GateError("Missing or invalid reviewer routes or profiles. Run review-gate setup.") from exc

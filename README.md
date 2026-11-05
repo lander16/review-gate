@@ -1,35 +1,43 @@
 # Review Gate
 
-Get two independent model reviews before you implement a plan or hand off a code change. Choose Codex, Antigravity, Claude Code, or OpenCode as your primary. Review Gate selects two reviewer models from different families than the primary and each other.
+Get an independent model review before you implement a plan or hand off a code change. Choose Codex, Antigravity, Claude Code, or OpenCode as your primary. Use one reviewer for routine work and add a second for critical changes.
 
 ## Quick start
 
 Install once from a checkout of this private repository. This example uses Python 3.11 or later and `uv`.
 
 ```sh
-gh repo clone lander16/review-gate
+git clone https://github.com/lander16/review-gate.git
 cd review-gate
 uv tool install .
 ```
 
+For the private repository, Git needs credentials with access. If you use SSH, clone `git@github.com:lander16/review-gate.git` instead. From an existing checkout, run `git pull` and `uv tool install --reinstall .` to update an installed copy.
+
 In the repository you want to review, run the setup command for the agent doing the work. Setup finds the reviewer executables on your PATH. Each `--allow` explicitly authorizes the named service to receive review packets from this repository.
 
-| Primary agent | Default reviewers | Setup command |
+| Primary agent | Default reviewer with `agy` installed | Setup command |
 | --- | --- | --- |
-| Codex with an OpenAI model | Gemini and Claude via `agy` | `review-gate setup --primary codex --allow antigravity` |
-| Antigravity with a Gemini model | OpenAI via Codex and Claude via `agy` | `review-gate setup --primary antigravity --allow openai --allow antigravity` |
-| Claude Code with a Claude model | OpenAI via Codex and Gemini via `agy` | `review-gate setup --primary claude --allow openai --allow antigravity` |
-| OpenCode with a Qwen model, for example | Gemini and Claude via `agy` | `review-gate setup --primary opencode --primary-family qwen --allow antigravity` |
+| Codex with an OpenAI model | Gemini via `agy` | `review-gate setup --primary codex --allow antigravity` |
+| Antigravity with a Gemini model | Claude via `agy` | `review-gate setup --primary antigravity --allow antigravity` |
+| Claude Code with a Claude model | Gemini via `agy` | `review-gate setup --primary claude --allow antigravity` |
+| OpenCode with a Qwen model, for example | Gemini via `agy` | `review-gate setup --primary opencode --primary-family qwen --allow antigravity` |
 
 Use the family of the model actually doing the work. For example, if Antigravity is running a Claude model, pass `--primary antigravity --primary-family claude`. OpenCode always needs the family when you first set it up. The same `plan` and `diff` commands work with all four harnesses.
 
-The default routes use only `agy` or Codex as reviewers. Sign in to the reviewer CLIs normally. If your account offers Claude through `agy`, you can get a Claude review without installing Claude Code. Omit `--allow` to inspect the route before approving it. Use a synthetic review to check the selected models before sending real work. See [Agent-assisted setup](#agent-assisted-setup).
+New routes default to one reviewer. Setup also saves an optional second profile when it finds a compatible CLI. Existing routes keep their configured reviewers. Sign in to the reviewer CLIs normally. If your account offers Claude through `agy`, you can get a Claude review without installing Claude Code. Omit `--allow` to inspect the route before approving it. Use a synthetic review to check the selected models before sending real work. See [Agent-assisted setup](#agent-assisted-setup).
 
 From the repository root, put the requirements in `task.md`. Then use:
 
 ```sh
 review-gate plan plan.md     # Before editing, with your proposed plan in plan.md
 review-gate diff             # After editing, to review changes since HEAD
+```
+
+For a critical change, select two named profiles. For example, with an OpenAI primary and the default Antigravity profiles:
+
+```sh
+review-gate diff --reviewer gemini-agy --reviewer claude-agy
 ```
 
 ## When and how to use it
@@ -64,17 +72,17 @@ The command prints the path to a private `report.json`. Open `summary.txt` besid
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | Both reviewers returned valid results with no reported blocker or material limitation |
+| 0 | All selected reviewers returned valid results with no reported blocker or material limitation |
 | 1 | A reviewer reported a blocker or material limitation, or the snapshot found a staged change hidden by the worktree |
 | 2 | The review could not complete, for example because a reviewer failed or the repository lacks approval |
 
-An exit of 0 still leaves you responsible for any omissions. If a reviewer fails, the report keeps any valid result from the other reviewer.
+An exit of 0 still leaves you responsible for any omissions. If one reviewer fails in a two-reviewer run, the report keeps any valid result from the other reviewer.
 
 ## Agent-assisted setup
 
 Open the checkout in your coding agent and say:
 
-> Set up Review Gate for this harness using [SETUP.md](SETUP.md). Install the skill at the scope I choose and verify both reviewers with a synthetic task.
+> Set up Review Gate for this harness using [SETUP.md](SETUP.md). Install the skill at the scope I choose and verify the selected reviewers with a synthetic task.
 
 Once installed, use `$review-gate` in Codex or `/review-gate` in Antigravity or Claude Code. In OpenCode, ask the agent to use the `review-gate` skill by name. For example:
 
@@ -103,14 +111,14 @@ Start a new agent session if the skill is missing. See the official skill guides
 
 ## Choose reviewer models
 
-`setup` prints the selected profile names and model IDs. Each `[reviewers.NAME]` profile in `~/.config/review-gate/config.toml` pins a CLI, service, model family, and exact model ID. By default, both phases use the same pair. The initial `agy` profiles use Gemini 4 Argon Medium and Claude Sonnet 5.5 Medium. The default Codex reviewer uses `gpt-6.1-sol`.
+`setup` prints the selected profile names and model IDs. Each `[reviewers.NAME]` profile in `~/.config/review-gate/config.toml` pins a CLI, service, model family, and exact model ID. By default, both phases use the same single reviewer. The initial `agy` profiles use Gemini 4 Argon Medium and Claude Sonnet 5.5 Medium. The default Codex reviewer uses `gpt-6.1-sol`.
 
-To use different models for planning and code review, replace the existing route array for your primary model family with a two-phase table. This example keeps Gemini the same and uses a higher-effort Claude profile for plans:
+To use different models or reviewer counts for planning and code review, replace the route array for your primary model family with a two-phase table. This example uses two reviewers for plans and one for diffs.
 
 ```toml
 [routes.openai]
 plan = ["gemini-agy", "claude-plan"]
-diff = ["gemini-agy", "claude-agy"]
+diff = ["gemini-agy"]
 
 [reviewers.claude-plan]
 adapter = "agy"
@@ -121,21 +129,22 @@ binary = "/absolute/path/to/agy"
 version = "1.5.0"
 ```
 
-Keep the existing `gemini-agy` and `claude-agy` profiles. Remove the old `openai = [...]` line under `[routes]` before adding `[routes.openai]`. Use the same binary path and version as your working `claude-agy` profile, and check model IDs with `agy models`. Run `review-gate setup` to see both pairs and the required service approvals. The report records the exact model ID passed to each reviewer.
+Keep the existing `gemini-agy` and `claude-agy` profiles. Remove the old `openai = [...]` line under `[routes]` before adding `[routes.openai]`. Use the same binary path and version as your working `claude-agy` profile, and check model IDs with `agy models`. Run `review-gate setup` to see the defaults for both phases, optional profiles, and required approvals. The report records the exact model ID passed to each reviewer.
 
-For a one-off change, pass two existing profile names. This keeps the saved defaults:
+For a one-off change, pass one or two existing profile names. The saved route stays in place.
 
 ```sh
+review-gate diff --reviewer claude-plan
 review-gate diff --reviewer gemini-agy --reviewer claude-plan
 ```
 
-Each run still needs two distinct reviewer families and repository approval for both services.
+Each selected reviewer must come from a different model family than the primary and any other reviewer. Approve each selected service for the repository. To make an existing route use one reviewer by default, keep just one name in its array, for example `openai = ["gemini-agy"]` under `[routes]`.
 
 ## Configuration and sharing
 
-- To approve another repository, run `review-gate setup --allow antigravity` there if your saved route uses only Antigravity. For an Antigravity primary using Codex and a Claude model through `agy`, use `review-gate setup --primary antigravity --allow openai --allow antigravity`.
+- To approve another repository, run `review-gate setup --allow antigravity` there if your saved route uses only Antigravity. If you want to use a configured optional profile that sends to another service, include its service in the approvals. For example, with an Antigravity primary and a configured Codex reviewer, use `review-gate setup --primary antigravity --allow antigravity --allow openai`.
 - `setup` keeps existing routes and approvals. It saves the primary harness and family as your defaults. Override them for one review with `--primary` and `--primary-family`.
-- Edit `~/.config/review-gate/config.toml` to customize the two reviewers for a primary family. You can use the Claude Code CLI or an OpenCode Go model as a reviewer by defining a profile and adding it to the route. Use `agy models` for available models. [config.example.toml](config.example.toml) shows the format for custom routes. For older configs, set `mode = "native"` and remove the legacy launcher and reviewer profile fields. To revoke an approval, remove that service from the repository's `approved_services` entry.
+- Edit `~/.config/review-gate/config.toml` to customize the reviewers for a primary family. You can use the Claude Code CLI or an OpenCode Go model as a reviewer by defining a profile and adding it to the route. Use `agy models` for available models. [config.example.toml](config.example.toml) shows the format for custom routes. For older configs, set `mode = "native"` and remove the legacy launcher and reviewer profile fields. To revoke an approval, remove that service from the repository's `approved_services` entry.
 - Native mode relies on CLI tool restrictions and has no OS-level filesystem or network allowlist. Antigravity uses its normal login and may write session state in its usual directories. Keep the config and reports outside the reviewed repo. Stronger isolation is tracked in [issue #1](https://github.com/lander16/review-gate/issues/1).
 
 To run the offline tests from the checkout, use `uv run --extra test pytest -q`.

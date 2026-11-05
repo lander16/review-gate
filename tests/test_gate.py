@@ -145,7 +145,7 @@ packet = sys.stdin.buffer.read()
 peers = Path(__file__).parent
 (peers / (profile + ".ready")).touch()
 deadline = time.monotonic() + 3
-while len(list(peers.glob("*.ready"))) != 2:
+while profile != "solo" and len(list(peers.glob("*.ready"))) != 2:
     if time.monotonic() > deadline:
         raise SystemExit(3)
     time.sleep(0.01)
@@ -296,23 +296,34 @@ def test_setup_then_short_commands(repo, launch, monkeypatch):
     assert config.read_text().startswith("# keep this comment\n")
     data = tomllib.loads(config.read_text())
     assert data["default_primary"] == "codex"
+    assert data["routes"]["openai"] == ["gemini-agy"]
+    assert "claude-agy" in data["reviewers"]
     assert data["approved_services"] == {str(repo): ["antigravity"]}
     assert config.stat().st_mode & 0o777 == 0o600
 
     # Use the fake executable's short model IDs for this offline round.
-    config.write_text(config.read_text().replace("gemini-4-argon-medium", "first")
+    config.write_text(config.read_text().replace("gemini-4-argon-medium", "solo")
                       .replace("claude-sonnet-5-5-medium", "second"))
     assert main(["plan", "plan.md", *common, "--reports", str(reports)]) == 0
     (repo / "existing.py").write_text("changed = 42\n")
     assert main(["diff", *common, "--reports", str(reports)]) == 0
+    assert len(list(reports.glob("*/report.json"))) == 3
+    for path in reports.glob("*/report.json"):
+        result = json.loads(path.read_text())
+        if result["exit_code"] == 0:
+            assert [reviewer["model"] for reviewer in result["reviewers"]] == ["solo"]
+
+    assert main(["diff", "--reviewer", "gemini-agy", "--reviewer", "claude-agy",
+                 *common, "--reports", str(reports)]) == 0
+    assert tomllib.loads(config.read_text())["routes"]["openai"] == ["gemini-agy"]
 
 
 @pytest.mark.parametrize(("primary", "family_flag", "family", "reviewer_families"), [
-    ("codex", [], "openai", {"gemini", "claude"}),
-    ("antigravity", [], "gemini", {"openai", "claude"}),
-    ("claude", [], "claude", {"openai", "gemini"}),
-    ("antigravity", ["--primary-family", "claude"], "claude", {"openai", "gemini"}),
-    ("opencode", ["--primary-family", "qwen"], "qwen", {"gemini", "claude"}),
+    ("codex", [], "openai", {"gemini"}),
+    ("antigravity", [], "gemini", {"claude"}),
+    ("claude", [], "claude", {"gemini"}),
+    ("antigravity", ["--primary-family", "claude"], "claude", {"gemini"}),
+    ("opencode", ["--primary-family", "qwen"], "qwen", {"gemini"}),
 ])
 def test_any_harness_can_be_primary(repo, launch, monkeypatch, primary, family_flag,
                                     family, reviewer_families):
@@ -344,8 +355,8 @@ def test_phase_routes_and_one_run_override(repo, launch, monkeypatch):
     config = configure(repo, launch, "second")
     text = config.read_text().replace(
         '[routes]\nopenai = ["a", "b"]',
-        '[routes.openai]\nplan = ["a", "b"]\ndiff = ["a", "code-claude"]',
-    )
+        '[routes.openai]\nplan = ["a"]\ndiff = ["a", "code-claude"]',
+    ).replace('model = "first"', 'model = "solo"')
     text += f'''
 [reviewers.code-claude]
 adapter = "agy"
@@ -360,8 +371,8 @@ version = "1.0.0"
     common = ["--config", str(config), "--reports", str(reports)]
     assert main(["setup", "--primary", "codex", "--allow", "antigravity",
                  "--config", str(config)]) == 0
-    assert [item.model for item in load(config, repo, phase="plan")] == ["first", "second"]
-    assert [item.model for item in load(config, repo, phase="diff")] == ["first", "block"]
+    assert [item.model for item in load(config, repo, phase="plan")] == ["solo"]
+    assert [item.model for item in load(config, repo, phase="diff")] == ["solo", "block"]
 
     assert main(["plan", "plan.md", *common]) == 0
     for marker in launch.parent.glob("*.ready"):
@@ -371,8 +382,10 @@ version = "1.0.0"
     for marker in launch.parent.glob("*.ready"):
         marker.unlink()
     assert main(["diff", "--reviewer", "a", "--reviewer", "b", *common]) == 0
-    assert [item.model for item in load(config, repo, phase="diff")] == ["first", "block"]
-    assert main(["plan", "plan.md", "--reviewer", "a", *common]) == 2
+    assert [item.model for item in load(config, repo, phase="diff")] == ["solo", "block"]
+    assert [item.name for item in load(config, repo, names=["a"])] == ["a"]
+    assert main(["plan", "plan.md", "--reviewer", "a", "--reviewer", "b",
+                 "--reviewer", "code-claude", *common]) == 2
     assert main(["plan", "plan.md", "--reviewer", "b", "--reviewer", "code-claude", *common]) == 2
 
     config.write_text(config.read_text().replace(
@@ -384,3 +397,23 @@ version = "1.0.0"
     assert main(["setup", "--allow", "antigravity", "--config", str(config)]) == 2
     assert main(["setup", "--allow", "antigravity", "--allow", "other",
                  "--config", str(config)]) == 0
+
+
+def test_setup_can_use_one_installed_reviewer(repo, launch, monkeypatch):
+    from review_gate.config import load
+
+    monkeypatch.chdir(repo)
+    launch.with_name("agy").symlink_to(launch)
+    monkeypatch.setenv("PATH", str(launch.parent) + os.pathsep + os.defpath)
+    config = launch.with_name("config.toml")
+    setup = ["setup", "--primary", "antigravity", "--config", str(config),
+             "--allow", "antigravity"]
+    assert main(setup) == 0
+    assert [reviewer.name for reviewer in load(config, repo)] == ["claude-agy"]
+    assert main([*setup, "--allow", "openai"]) == 2
+    launch.with_name("codex").symlink_to(launch)
+    assert main([*setup, "--allow", "openai"]) == 0
+    assert [reviewer.name for reviewer in load(config, repo)] == ["claude-agy"]
+    assert [reviewer.name for reviewer in load(config, repo, names=["claude-agy", "openai-codex"])] == [
+        "claude-agy", "openai-codex",
+    ]

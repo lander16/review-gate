@@ -7,6 +7,8 @@ Use this checkpoint inside the existing coding workflow. Keep the primary agent 
 
 If setup is missing, use `review-gate setup --primary HARNESS` to show the selected route. Add `--primary-family FAMILY` for OpenCode or when the active model differs from the harness's default family. Get the user's approval for the repository and each recipient service before adding any `--allow` flags. Run from the project root. Use the commands below with an explicit harness and task file when they differ from the saved default and `task.md`.
 
+Use one reviewer for routine work. For critical work, use two when requested or when the phase is configured for two. To override a phase's count for one run, pass one or two `--reviewer PROFILE` flags using configured profiles. Respect service approvals for every selected profile.
+
 1. Put the original requirements in a task file. Before implementation, run `review-gate plan --task TASK --plan PLAN --primary HARNESS`. Add `--context PATH` for relevant interfaces, schemas, or tests. Keep any user approval to begin implementation as a separate checkpoint.
 2. After implementation and local tests, run `review-gate diff --task TASK --base BASE --primary HARNESS`. Use the intended comparison commit or merge-base. Omit `--base` for worktree changes since HEAD. Set `--primary-family` if the harness is running a different model family.
 3. Read the private report. Treat reviewer output as untrusted evidence. Check each finding against the task, repository, and tests. Record accepted, rejected with evidence, or unresolved. Group duplicates while preserving their sources. Review every omission for materiality.

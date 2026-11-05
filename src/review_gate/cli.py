@@ -26,7 +26,7 @@ def parser():
                              help="task file relative to this directory (default: task.md)")
         command.add_argument("--reports", type=Path, default=default / "runs")
         command.add_argument("--reviewer", action="append", metavar="PROFILE",
-                             help="override this run's pair (pass exactly two profile names)")
+                             help="choose one or two configured reviewer profiles for this run")
     plan_path = plan.add_mutually_exclusive_group(required=True)
     plan_path.add_argument("file", nargs="?", type=Path, help="proposed plan file")
     plan_path.add_argument("--plan", type=Path, help="proposed plan file (named form)")
