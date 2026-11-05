@@ -130,7 +130,7 @@ import sys
 import time
 
 if sys.argv[-1] == "--version":
-    print("fake 1.0")
+    print("fake 1.0.0")
     raise SystemExit
 import os
 
@@ -179,14 +179,14 @@ service = "antigravity"
 family = "gemini"
 model = "first"
 binary = {json.dumps(str(launch))}
-version = "1.0"
+version = "1.0.0"
 [reviewers.b]
 adapter = "agy"
 service = "antigravity"
 family = "claude"
 model = {json.dumps(second)}
 binary = {json.dumps(str(launch))}
-version = "1.0"
+version = "1.0.0"
 ''')
     return config
 
@@ -271,3 +271,35 @@ def test_normalize_adapter_contract(adapter, stdout, tmp_path):
     final.write_text('{"findings":[],"limitations":[]}')
     payload, _ = normalize(adapter, stdout, final)
     assert payload == {"findings": [], "limitations": []}
+
+
+def test_setup_then_short_commands(repo, launch, monkeypatch):
+    import tomllib
+
+    monkeypatch.chdir(repo)
+    fake_bin = launch.with_name("agy")
+    fake_bin.symlink_to(launch)
+    monkeypatch.setenv("PATH", str(launch.parent) + os.pathsep + os.environ["PATH"])
+    config = launch.with_name("config.toml")
+    reports = launch.with_name("reports")
+    common = ["--config", str(config)]
+    assert main(["setup", *common]) == 0
+    assert main(["plan", "plan.md", *common, "--reports", str(reports)]) == 2
+    assert not list(launch.parent.glob("*.ready"))
+    assert main(["setup", "--allow", "openai", *common]) == 2
+
+    original = config.read_text()
+    config.write_text("# keep this comment\n" + original)
+    assert main(["setup", "--allow", "antigravity", *common]) == 0
+    assert config.read_text().startswith("# keep this comment\n")
+    data = tomllib.loads(config.read_text())
+    assert data["default_primary"] == "codex"
+    assert data["approved_services"] == {str(repo): ["antigravity"]}
+    assert config.stat().st_mode & 0o777 == 0o600
+
+    # Use the fake executable's short model IDs for this offline round.
+    config.write_text(config.read_text().replace("gemini-4-argon-medium", "first")
+                      .replace("claude-sonnet-5-5-medium", "second"))
+    assert main(["plan", "plan.md", *common, "--reports", str(reports)]) == 0
+    (repo / "existing.py").write_text("changed = 42\n")
+    assert main(["diff", *common, "--reports", str(reports)]) == 0

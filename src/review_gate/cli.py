@@ -6,6 +6,7 @@ import sys
 from .config import PRIMARY, load
 from .report import exit_code, private_directory, write_report
 from .runners import review
+from .setup import configure
 from .snapshot import GateError, capture, digest
 
 
@@ -15,21 +16,37 @@ def parser():
     commands = cli.add_subparsers(dest="phase", required=True)
     plan = commands.add_parser("plan", help="Review a proposed implementation plan")
     diff = commands.add_parser("diff", help="Review worktree changes relative to a base commit")
-    for command in (plan, diff):
-        command.add_argument("--task", required=True, type=Path)
-        command.add_argument("--primary", required=True, choices=PRIMARY)
-        command.add_argument("--primary-family")
+    setup = commands.add_parser("setup", help="Configure a default harness and approve services")
+    for command in (plan, diff, setup):
+        command.add_argument("--primary", choices=PRIMARY, help="primary coding harness")
         command.add_argument("--config", type=Path, default=default / "config.toml")
+    for command in (plan, diff):
+        command.add_argument("--task", type=Path, default=Path("task.md"),
+                             help="task file relative to this directory (default: task.md)")
+        command.add_argument("--primary-family", help="override the primary harness's model family")
         command.add_argument("--reports", type=Path, default=default / "runs")
-    plan.add_argument("--plan", required=True, type=Path)
-    plan.add_argument("--context", action="append", default=[])
-    diff.add_argument("--base", required=True)
+    plan_path = plan.add_mutually_exclusive_group(required=True)
+    plan_path.add_argument("file", nargs="?", type=Path, help="proposed plan file")
+    plan_path.add_argument("--plan", type=Path, help="proposed plan file (named form)")
+    plan.add_argument("--context", action="append", default=[], metavar="PATH")
+    diff.add_argument("--base", default="HEAD", help="comparison commit (default: HEAD)")
+    setup.add_argument("--allow", action="append", default=[], metavar="SERVICE",
+                       help="approve this repository for the named reviewer service (repeatable)")
     return cli
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     root = Path.cwd().resolve()
+    if args.phase == "setup":
+        try:
+            configure(args, root)
+            return 0
+        except (GateError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            print(f"Setup failed: {exc}", file=sys.stderr)
+            return 2
+    if args.phase == "plan":
+        args.plan = args.plan or args.file
     packet = {"phase": args.phase}
     reviewers, results = [], []
     packet_hash = None
@@ -38,7 +55,7 @@ def main(argv=None):
     try:
         root, packet, packet_bytes = capture(args, root)
         packet_hash = digest(packet_bytes)
-        reviewers = load(args.config, root, args.primary_family or PRIMARY[args.primary])
+        reviewers = load(args.config, root, args.primary_family, primary=args.primary)
         private_directory(args.reports, root)
         results = review(reviewers, packet, packet_bytes)
         code = exit_code(results)

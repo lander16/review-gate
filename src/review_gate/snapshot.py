@@ -209,14 +209,17 @@ def diff_packet(root, base_ref):
     return base, changes, recheck
 
 
+def repository_root(cwd, *, required=False):
+    try:
+        return Path(os.fsdecode(git(cwd, "rev-parse", "--show-toplevel").rstrip(b"\n"))).resolve()
+    except GateError:
+        if required:
+            raise
+        return cwd
+
+
 def capture(args, cwd):
-    if args.phase == "diff" or getattr(args, "context", []):
-        root = Path(os.fsdecode(git(cwd, "rev-parse", "--show-toplevel").rstrip(b"\n")))
-    else:
-        try:
-            root = Path(os.fsdecode(git(cwd, "rev-parse", "--show-toplevel").rstrip(b"\n")))
-        except GateError:
-            root = cwd
+    root = repository_root(cwd, required=args.phase == "diff" or bool(getattr(args, "context", [])))
     task_path = Path(os.path.abspath(cwd / args.task))
     task_root = Path(task_path.anchor)
     task_name = str(task_path.relative_to(task_root))

@@ -24,14 +24,23 @@ def absolute(value):
     return isinstance(value, str) and Path(value).is_absolute()
 
 
-def load(path, root, family):
+def config_path(path, root):
     path = path.expanduser().resolve()
     if path.is_relative_to(root.resolve()):
         raise GateError("Reviewer configuration must be outside the reviewed repository")
+    return path
+
+
+def read_config(path):
+    if not path.is_file():
+        raise GateError("Reviewer config is missing. Run review-gate setup first.")
     if path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o022:
         raise GateError("Reviewer configuration must be user-owned and private from edits")
     with path.open("rb") as source:
-        config = tomllib.load(source)
+        return tomllib.load(source)
+
+
+def route_reviewers(config, root, family):
     try:
         names = config["routes"][family]
         if not isinstance(names, list) or len(names) != 2:
@@ -52,9 +61,32 @@ def load(path, root, family):
                 raise GateError("OpenCode profiles must pin an OpenCode Go model")
         if len({family, *(reviewer.family for reviewer in reviewers)}) != 3:
             raise GateError("The primary and both reviewers must use distinct model families")
-        approved = config.get("approved_services", {}).get(str(root.resolve()), [])
-        if not isinstance(approved, list) or any(r.service not in approved for r in reviewers):
-            raise GateError("Approve this repository for both reviewer services first")
         return reviewers
-    except (KeyError, TypeError) as exc:
-        raise GateError("Missing or invalid reviewer routes or profiles") from exc
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise GateError("Missing or invalid reviewer routes or profiles. Run review-gate setup.") from exc
+
+
+def approved_services(config, root):
+    approvals = config.get("approved_services", {})
+    if not hasattr(approvals, "get"):
+        raise GateError("Approved services must be a table of repository paths")
+    approved = approvals.get(str(root.resolve()), [])
+    if not isinstance(approved, list) or not all(isinstance(service, str) for service in approved):
+        raise GateError("Repository approvals must be a list of service names")
+    return set(approved)
+
+
+def load(path, root, family=None, *, primary=None):
+    config = read_config(config_path(path, root))
+    if family is None:
+        primary = primary or config.get("default_primary")
+        if not isinstance(primary, str) or primary not in PRIMARY:
+            raise GateError("Set a default with review-gate setup or pass --primary")
+        family = PRIMARY[primary]
+    reviewers = route_reviewers(config, root, family)
+    approved = approved_services(config, root)
+    required = {r.service for r in reviewers}
+    if not required.issubset(approved):
+        raise GateError("Approve this repository first. See review-gate setup --help. "
+                        f"Required services: {', '.join(sorted(required))}")
+    return reviewers
