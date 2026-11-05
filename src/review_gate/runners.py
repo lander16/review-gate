@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files
+import getpass
 import json
 import os
 from pathlib import Path
@@ -205,7 +206,10 @@ AUTH_FILES = {
 
 def reviewer_environment(reviewer, home):
     user_home = Path.home()
+    username = getpass.getuser()
     env = {
+        "USER": username,
+        "LOGNAME": username,
         "HOME": str(home),
         "PATH": str(Path(reviewer.binary).parent) + os.pathsep + os.defpath,
     }

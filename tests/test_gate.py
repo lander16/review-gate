@@ -417,3 +417,37 @@ def test_setup_can_use_one_installed_reviewer(repo, launch, monkeypatch):
     assert [reviewer.name for reviewer in load(config, repo, names=["claude-agy", "openai-codex"])] == [
         "claude-agy", "openai-codex",
     ]
+
+
+def test_native_claude_receives_login_identity(tmp_path):
+    from review_gate.config import Reviewer
+    from review_gate.runners import review
+
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!{sys.executable}\n" + '''
+import getpass
+import json
+import os
+import sys
+
+if sys.argv[-1] == "--version":
+    print("test-cli 1.0.0")
+    raise SystemExit
+if os.environ.get("USER") != getpass.getuser() or os.environ.get("LOGNAME") != getpass.getuser():
+    raise SystemExit("Not logged in")
+assert "--safe-mode" in sys.argv
+assert sys.argv[sys.argv.index("--tools") + 1] == ""
+assert sys.stdin.buffer.read()
+print(json.dumps({
+    "type": "result", "subtype": "success",
+    "structured_output": {"findings": [], "limitations": []},
+}))
+''')
+    fake.chmod(0o700)
+    reviewer = Reviewer("claude-native", "claude", "anthropic", "claude",
+                        "synthetic-model", str(fake), "1.0.0")
+    packet = {"phase": "plan", "documents": [
+        {"path": "task", "side": "task", "text": "Synthetic task"},
+    ]}
+    result = review([reviewer], packet, json.dumps(packet).encode())
+    assert result[0]["status"] == "ok", result
