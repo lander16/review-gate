@@ -101,6 +101,36 @@ cp -R skills/review-gate "$HOME/.agents/skills/"
 
 Start a new agent session if the skill is missing. See the official skill guides for [Codex](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills), [Antigravity](https://antigravity.google/docs/skills), [Claude Code](https://code.claude.com/docs/en/skills), and [OpenCode](https://opencode.ai/docs/skills/).
 
+## Choose reviewer models
+
+`setup` prints the selected profile names and model IDs. Each `[reviewers.NAME]` profile in `~/.config/review-gate/config.toml` pins a CLI, service, model family, and exact model ID. By default, both phases use the same pair. The initial `agy` profiles use Gemini 4 Argon Medium and Claude Sonnet 5.5 Medium. The default Codex reviewer uses `gpt-6.1-sol`.
+
+To use different models for planning and code review, replace the existing route array for your primary model family with a two-phase table. This example keeps Gemini the same and uses a higher-effort Claude profile for plans:
+
+```toml
+[routes.openai]
+plan = ["gemini-agy", "claude-plan"]
+diff = ["gemini-agy", "claude-agy"]
+
+[reviewers.claude-plan]
+adapter = "agy"
+service = "antigravity"
+family = "claude"
+model = "claude-sonnet-5-5-high"
+binary = "/absolute/path/to/agy"
+version = "1.5.0"
+```
+
+Keep the existing `gemini-agy` and `claude-agy` profiles. Remove the old `openai = [...]` line under `[routes]` before adding `[routes.openai]`. Use the same binary path and version as your working `claude-agy` profile, and check model IDs with `agy models`. Run `review-gate setup` to see both pairs and the required service approvals. The report records the exact model ID passed to each reviewer.
+
+For a one-off change, pass two existing profile names. This keeps the saved defaults:
+
+```sh
+review-gate diff --reviewer gemini-agy --reviewer claude-plan
+```
+
+Each run still needs two distinct reviewer families and repository approval for both services.
+
 ## Configuration and sharing
 
 - To approve another repository, run `review-gate setup --allow antigravity` there if your saved route uses only Antigravity. For an Antigravity primary using Codex and a Claude model through `agy`, use `review-gate setup --primary antigravity --allow openai --allow antigravity`.

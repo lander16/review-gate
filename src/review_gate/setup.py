@@ -9,7 +9,7 @@ import tempfile
 import tomlkit
 
 from .config import (
-    PRIMARY, approved_services, config_path, primary_family, read_config, route_reviewers,
+    PHASES, PRIMARY, approved_services, config_path, primary_family, read_config, route_reviewers,
 )
 from .runners import run_process
 from .snapshot import GateError, repository_root
@@ -89,8 +89,8 @@ def configure(args, cwd):
         routes = config.setdefault("routes", {})
         if family not in routes:
             add_route(config, family, root)
-        reviewers = route_reviewers(config, root, family)
-        required = {reviewer.service for reviewer in reviewers}
+        pairs = {phase: route_reviewers(config, root, family, phase) for phase in PHASES}
+        required = {reviewer.service for pair in pairs.values() for reviewer in pair}
         allowed = set(args.allow)
         if allowed and allowed != required:
             raise GateError(f"Pass --allow for exactly these services: {', '.join(sorted(required))}")
@@ -101,9 +101,13 @@ def configure(args, cwd):
         if allowed:
             approvals[str(root)] = sorted(approved)
         save(path, config)
-    for reviewer in reviewers:
-        print(f"{reviewer.family}: {reviewer.model} via {reviewer.service} "
-              f"({reviewer.adapter} {reviewer.version})")
+    if pairs["plan"] == pairs["diff"]:
+        pairs = {"plan and diff": pairs["plan"]}
+    for phase, pair in pairs.items():
+        print(f"{phase}:")
+        for reviewer in pair:
+            print(f"  {reviewer.name}: {reviewer.model} via {reviewer.service} "
+                  f"({reviewer.adapter} {reviewer.version})")
     print(f"Saved {path}")
     if not required.issubset(approved):
         flags = [flag for service in sorted(required) for flag in ("--allow", service)]

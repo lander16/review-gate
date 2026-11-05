@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ from .snapshot import GateError
 
 PRIMARY = {"codex": "openai", "antigravity": "gemini", "claude": "claude", "opencode": None}
 ADAPTERS = {"codex", "agy", "claude", "opencode"}
+PHASES = ("plan", "diff")
 
 
 @dataclass(frozen=True)
@@ -40,11 +42,18 @@ def read_config(path):
         return tomllib.load(source)
 
 
-def route_reviewers(config, root, family):
+def route_reviewers(config, root, family, phase="plan", *, names=None):
     try:
-        names = config["routes"][family]
+        if names is None:
+            route = config["routes"][family]
+            if isinstance(route, Mapping):
+                if set(route) != set(PHASES):
+                    raise GateError(f"Route for {family} must specify both plan and diff")
+                names = route[phase]
+            else:
+                names = route
         if not isinstance(names, list) or len(names) != 2:
-            raise GateError("Configure exactly two reviewers")
+            raise GateError("Choose exactly two reviewer profiles")
         if config.get("mode") != "native" or "launcher" in config:
             raise GateError("Set mode = 'native' and remove legacy launcher and profile fields")
         reviewers = [Reviewer(name, **config["reviewers"][name]) for name in names]
@@ -95,13 +104,13 @@ def primary_family(config, primary, family):
     return family
 
 
-def load(path, root, family=None, *, primary=None):
+def load(path, root, family=None, *, primary=None, phase="plan", names=None):
     config = read_config(config_path(path, root))
     family = primary_family(config, primary, family)
-    reviewers = route_reviewers(config, root, family)
+    reviewers = route_reviewers(config, root, family, phase, names=names)
     approved = approved_services(config, root)
     required = {r.service for r in reviewers}
     if not required.issubset(approved):
-        raise GateError("Approve this repository first. See review-gate setup --help. "
-                        f"Required services: {', '.join(sorted(required))}")
+        raise GateError("Approve the selected reviewers' services for this repository first. "
+                        f"Missing approvals: {', '.join(sorted(required - approved))}")
     return reviewers

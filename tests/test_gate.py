@@ -335,3 +335,52 @@ def test_any_harness_can_be_primary(repo, launch, monkeypatch, primary, family_f
     assert tomllib.loads(config.read_text())["default_primary_family"] == family
     assert {reviewer.family for reviewer in load(config, repo)} == reviewer_families
     assert {reviewer.family for reviewer in load(config, repo, primary=primary)} == reviewer_families
+
+
+def test_phase_routes_and_one_run_override(repo, launch, monkeypatch):
+    from review_gate.config import load
+
+    monkeypatch.chdir(repo)
+    config = configure(repo, launch, "second")
+    text = config.read_text().replace(
+        '[routes]\nopenai = ["a", "b"]',
+        '[routes.openai]\nplan = ["a", "b"]\ndiff = ["a", "code-claude"]',
+    )
+    text += f'''
+[reviewers.code-claude]
+adapter = "agy"
+service = "antigravity"
+family = "claude"
+model = "block"
+binary = {json.dumps(str(launch))}
+version = "1.0.0"
+'''
+    config.write_text(text)
+    reports = launch.with_name("reports")
+    common = ["--config", str(config), "--reports", str(reports)]
+    assert main(["setup", "--primary", "codex", "--allow", "antigravity",
+                 "--config", str(config)]) == 0
+    assert [item.model for item in load(config, repo, phase="plan")] == ["first", "second"]
+    assert [item.model for item in load(config, repo, phase="diff")] == ["first", "block"]
+
+    assert main(["plan", "plan.md", *common]) == 0
+    for marker in launch.parent.glob("*.ready"):
+        marker.unlink()
+    (repo / "existing.py").write_text("changed = 42\n")
+    assert main(["diff", *common]) == 1
+    for marker in launch.parent.glob("*.ready"):
+        marker.unlink()
+    assert main(["diff", "--reviewer", "a", "--reviewer", "b", *common]) == 0
+    assert [item.model for item in load(config, repo, phase="diff")] == ["first", "block"]
+    assert main(["plan", "plan.md", "--reviewer", "a", *common]) == 2
+    assert main(["plan", "plan.md", "--reviewer", "b", "--reviewer", "code-claude", *common]) == 2
+
+    config.write_text(config.read_text().replace(
+        '[reviewers.code-claude]\nadapter = "agy"\nservice = "antigravity"',
+        '[reviewers.code-claude]\nadapter = "agy"\nservice = "other"',
+    ))
+    with pytest.raises(GateError, match="Missing approvals: other"):
+        load(config, repo, phase="plan", names=["a", "code-claude"])
+    assert main(["setup", "--allow", "antigravity", "--config", str(config)]) == 2
+    assert main(["setup", "--allow", "antigravity", "--allow", "other",
+                 "--config", str(config)]) == 0

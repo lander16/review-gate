@@ -25,6 +25,8 @@ def parser():
         command.add_argument("--task", type=Path, default=Path("task.md"),
                              help="task file relative to this directory (default: task.md)")
         command.add_argument("--reports", type=Path, default=default / "runs")
+        command.add_argument("--reviewer", action="append", metavar="PROFILE",
+                             help="override this run's pair (pass exactly two profile names)")
     plan_path = plan.add_mutually_exclusive_group(required=True)
     plan_path.add_argument("file", nargs="?", type=Path, help="proposed plan file")
     plan_path.add_argument("--plan", type=Path, help="proposed plan file (named form)")
@@ -55,7 +57,8 @@ def main(argv=None):
     try:
         root, packet, packet_bytes = capture(args, root)
         packet_hash = digest(packet_bytes)
-        reviewers = load(args.config, root, args.primary_family, primary=args.primary)
+        reviewers = load(args.config, root, args.primary_family, primary=args.primary,
+                         phase=args.phase, names=args.reviewer)
         private_directory(args.reports, root)
         results = review(reviewers, packet, packet_bytes)
         code = exit_code(results)
