@@ -283,7 +283,9 @@ def test_setup_then_short_commands(repo, launch, monkeypatch):
     config = launch.with_name("config.toml")
     reports = launch.with_name("reports")
     common = ["--config", str(config)]
-    assert main(["setup", *common]) == 0
+    assert main(["setup", *common]) == 2
+    assert not config.exists()
+    assert main(["setup", "--primary", "codex", *common]) == 0
     assert main(["plan", "plan.md", *common, "--reports", str(reports)]) == 2
     assert not list(launch.parent.glob("*.ready"))
     assert main(["setup", "--allow", "openai", *common]) == 2
@@ -303,3 +305,33 @@ def test_setup_then_short_commands(repo, launch, monkeypatch):
     assert main(["plan", "plan.md", *common, "--reports", str(reports)]) == 0
     (repo / "existing.py").write_text("changed = 42\n")
     assert main(["diff", *common, "--reports", str(reports)]) == 0
+
+
+@pytest.mark.parametrize(("primary", "family_flag", "family", "reviewer_families"), [
+    ("codex", [], "openai", {"gemini", "claude"}),
+    ("antigravity", [], "gemini", {"openai", "claude"}),
+    ("claude", [], "claude", {"openai", "gemini"}),
+    ("antigravity", ["--primary-family", "claude"], "claude", {"openai", "gemini"}),
+    ("opencode", ["--primary-family", "qwen"], "qwen", {"gemini", "claude"}),
+])
+def test_any_harness_can_be_primary(repo, launch, monkeypatch, primary, family_flag,
+                                    family, reviewer_families):
+    import tomllib
+    from review_gate.config import load
+
+    monkeypatch.chdir(repo)
+    for binary in ("agy", "codex"):
+        launch.with_name(binary).symlink_to(launch)
+    monkeypatch.setenv("PATH", str(launch.parent) + os.pathsep + os.environ["PATH"])
+    config = launch.with_name("config.toml")
+    approval = ["--allow", "antigravity"]
+    if "openai" in reviewer_families:
+        approval += ["--allow", "openai"]
+    if primary == "opencode":
+        assert main(["setup", "--primary", primary, "--config", str(config)]) == 2
+        assert not config.exists()
+    assert main(["setup", "--primary", primary, *family_flag, *approval,
+                 "--config", str(config)]) == 0
+    assert tomllib.loads(config.read_text())["default_primary_family"] == family
+    assert {reviewer.family for reviewer in load(config, repo)} == reviewer_families
+    assert {reviewer.family for reviewer in load(config, repo, primary=primary)} == reviewer_families

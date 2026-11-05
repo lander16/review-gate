@@ -5,7 +5,7 @@ import tomllib
 
 from .snapshot import GateError
 
-PRIMARY = {"codex": "openai", "antigravity": "gemini", "claude": "claude"}
+PRIMARY = {"codex": "openai", "antigravity": "gemini", "claude": "claude", "opencode": None}
 ADAPTERS = {"codex", "agy", "claude", "opencode"}
 
 
@@ -59,7 +59,7 @@ def route_reviewers(config, root, family):
                 raise GateError("Invalid reviewer configuration")
             if reviewer.adapter == "opencode" and not reviewer.model.startswith("opencode-go/"):
                 raise GateError("OpenCode profiles must pin an OpenCode Go model")
-        if len({family, *(reviewer.family for reviewer in reviewers)}) != 3:
+        if len({family.casefold(), *(reviewer.family.casefold() for reviewer in reviewers)}) != 3:
             raise GateError("The primary and both reviewers must use distinct model families")
         return reviewers
     except (KeyError, TypeError, AttributeError) as exc:
@@ -76,13 +76,28 @@ def approved_services(config, root):
     return set(approved)
 
 
+def primary_family(config, primary, family):
+    if family is None:
+        saved = config.get("default_primary")
+        primary = primary or saved
+        if not isinstance(primary, str) or primary not in PRIMARY:
+            raise GateError("Choose a coding harness with --primary or save one with review-gate setup")
+        if primary == saved:
+            family = config.get("default_primary_family")
+        if family is None:
+            family = PRIMARY[primary]
+        if family is None:
+            raise GateError("OpenCode requires --primary-family with the family of its active model")
+    if not isinstance(family, str) or not family or family.startswith("-") or any(
+        char.isspace() for char in family
+    ):
+        raise GateError("Specify a valid model family with --primary-family")
+    return family
+
+
 def load(path, root, family=None, *, primary=None):
     config = read_config(config_path(path, root))
-    if family is None:
-        primary = primary or config.get("default_primary")
-        if not isinstance(primary, str) or primary not in PRIMARY:
-            raise GateError("Set a default with review-gate setup or pass --primary")
-        family = PRIMARY[primary]
+    family = primary_family(config, primary, family)
     reviewers = route_reviewers(config, root, family)
     approved = approved_services(config, root)
     required = {r.service for r in reviewers}

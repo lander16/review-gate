@@ -8,7 +8,9 @@ import tempfile
 
 import tomlkit
 
-from .config import PRIMARY, approved_services, config_path, read_config, route_reviewers
+from .config import (
+    PRIMARY, approved_services, config_path, primary_family, read_config, route_reviewers,
+)
 from .runners import run_process
 from .snapshot import GateError, repository_root
 
@@ -36,9 +38,9 @@ def save(path, config):
 def add_route(config, family, root):
     names = []
     versions = {}
-    for other, (adapter, service, model) in DEFAULT_MODELS.items():
-        if other == family:
-            continue
+    candidates = [other for other in DEFAULT_MODELS if other != family.casefold()]
+    for other in candidates[:2]:
+        adapter, service, model = DEFAULT_MODELS[other]
         name = f"{other}-{adapter}"
         names.append(name)
         reviewers = config.setdefault("reviewers", {})
@@ -80,10 +82,10 @@ def configure(args, cwd):
             config["mode"] = "native"
         if config.get("mode") != "native" or "launcher" in config:
             raise GateError("Migrate the legacy config to native mode before running setup")
-        primary = args.primary or config.get("default_primary", "codex")
+        primary = args.primary or config.get("default_primary")
         if not isinstance(primary, str) or primary not in PRIMARY:
-            raise GateError("Choose a supported harness with --primary")
-        family = PRIMARY[primary]
+            raise GateError("Choose your coding harness with --primary on first setup")
+        family = primary_family(config, primary, args.primary_family)
         routes = config.setdefault("routes", {})
         if family not in routes:
             add_route(config, family, root)
@@ -93,6 +95,7 @@ def configure(args, cwd):
         if allowed and allowed != required:
             raise GateError(f"Pass --allow for exactly these services: {', '.join(sorted(required))}")
         config["default_primary"] = primary
+        config["default_primary_family"] = family
         approvals = config.setdefault("approved_services", {})
         approved = approved_services(config, root) | allowed
         if allowed:

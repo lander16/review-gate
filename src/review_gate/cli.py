@@ -19,11 +19,11 @@ def parser():
     setup = commands.add_parser("setup", help="Configure a default harness and approve services")
     for command in (plan, diff, setup):
         command.add_argument("--primary", choices=PRIMARY, help="primary coding harness")
+        command.add_argument("--primary-family", help="family of the active model, required for OpenCode on first setup")
         command.add_argument("--config", type=Path, default=default / "config.toml")
     for command in (plan, diff):
         command.add_argument("--task", type=Path, default=Path("task.md"),
                              help="task file relative to this directory (default: task.md)")
-        command.add_argument("--primary-family", help="override the primary harness's model family")
         command.add_argument("--reports", type=Path, default=default / "runs")
     plan_path = plan.add_mutually_exclusive_group(required=True)
     plan_path.add_argument("file", nargs="?", type=Path, help="proposed plan file")
