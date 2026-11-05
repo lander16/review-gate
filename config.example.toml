@@ -1,0 +1,25 @@
+launcher = "/absolute/path/to/qualified-launcher"
+
+[routes]
+openai = ["gemini-agy", "claude-agy"]
+
+[approved_services]
+"/absolute/path/to/approved/repo" = ["antigravity"]
+
+[reviewers.gemini-agy]
+adapter = "agy"
+service = "antigravity"
+family = "gemini"
+model = "PIN_VERIFIED_GEMINI_MODEL"
+binary = "/absolute/path/to/agy"
+version = "PIN_VERIFIED_VERSION"
+profile = "review-gemini"
+
+[reviewers.claude-agy]
+adapter = "agy"
+service = "antigravity"
+family = "claude"
+model = "PIN_VERIFIED_CLAUDE_MODEL"
+binary = "/absolute/path/to/agy"
+version = "PIN_VERIFIED_VERSION"
+profile = "review-claude"

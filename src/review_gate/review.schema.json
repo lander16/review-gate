@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings", "limitations"],
+  "properties": {
+    "findings": {
+      "type": "array", "maxItems": 30,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["severity", "title", "consequence", "evidence"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["blocker", "advisory"]},
+          "title": {"type": "string", "minLength": 1, "maxLength": 200},
+          "consequence": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "evidence": {
+            "type": "object", "additionalProperties": false,
+            "required": ["path", "side", "start", "end"],
+            "properties": {
+              "path": {"type": "string"},
+              "side": {"type": "string", "enum": ["task", "plan", "context", "base", "worktree"]},
+              "start": {"type": "integer", "minimum": 1},
+              "end": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array", "maxItems": 30,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["material", "description"],
+        "properties": {
+          "material": {"type": "boolean"},
+          "description": {"type": "string", "minLength": 1, "maxLength": 2000}
+        }
+      }
+    }
+  }
+}
