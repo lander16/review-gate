@@ -451,3 +451,48 @@ print(json.dumps({
     ]}
     result = review([reviewer], packet, json.dumps(packet).encode())
     assert result[0]["status"] == "ok", result
+
+
+def test_effort_overrides_and_report(repo, launch, monkeypatch):
+    from review_gate.config import load
+
+    monkeypatch.chdir(repo)
+    config = configure(repo, launch, "second")
+    config.write_text(config.read_text().replace('model = "first"', 'model = "first"\neffort = "low"'))
+    reports = launch.with_name("reports")
+    common = ["--primary", "codex", "--config", str(config), "--reports", str(reports)]
+    assert [r.effort for r in load(config, repo, primary="codex")] == ["low", None]
+    assert main(["plan", "plan.md", "--effort", "a=high", "--effort", "b=medium", *common]) == 0
+    report = json.loads(next(reports.glob("*/report.json")).read_text())
+    assert [r["effort"] for r in report["reviewers"]] == ["high", "medium"]
+    for overrides in (["a=high", "a=low"], ["unknown=high"], ["a=bogus"], ["a"], ["a="], ["a=-high"]):
+        flags = [flag for value in overrides for flag in ("--effort", value)]
+        assert main(["plan", "plan.md", *flags, *common]) == 2
+
+
+def test_effort_adapter_commands(tmp_path):
+    from review_gate.config import Reviewer
+    from review_gate.runners import command
+
+    for adapter, flag, value in (("codex", "-c", 'model_reasoning_effort="high"'),
+                                  ("agy", "--effort", "high"),
+                                  ("claude", "--effort", "high"),
+                                  ("opencode", "--variant", "high")):
+        reviewer = Reviewer("r", adapter, "service", "family", "model-medium", "/bin/true", "1", "high")
+        argv, _, _ = command(reviewer, b"prompt", tmp_path)
+        assert argv[argv.index("--model") + 1] == "model-medium"
+        assert any(argv[i:i + 2] == [flag, value] for i in range(len(argv) - 1))
+        without, _, _ = command(Reviewer("r", adapter, "service", "family", "model-medium", "/bin/true", "1"), b"prompt", tmp_path)
+        assert "--effort" not in without and "--variant" not in without
+        assert not any(arg.startswith("model_reasoning_effort=") for arg in without)
+
+
+def test_invalid_config_effort(repo, launch):
+    from review_gate.config import load
+
+    config = configure(repo, launch, "second")
+    original = config.read_text()
+    for value in ("42", '""', '"-high"'):
+        config.write_text(original.replace('model = "first"', f'model = "first"\neffort = {value}'))
+        with pytest.raises(GateError, match="Invalid effort"):
+            load(config, repo, primary="codex")

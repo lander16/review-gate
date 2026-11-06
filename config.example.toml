@@ -31,5 +31,7 @@ adapter = "codex"
 service = "openai"
 family = "openai"
 model = "gpt-6.1-sol"
+# Optional; omit to use the CLI default.
+effort = "high"
 binary = "/absolute/path/to/codex"
 version = "0.166.0"

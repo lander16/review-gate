@@ -31,7 +31,7 @@ def write_report(parent, root, packet, packet_hash, reviewers, results, code, er
     parent = private_directory(parent, root)
     folder = Path(tempfile.mkdtemp(prefix="run-", dir=parent))
     public = [{"name": r.name, "adapter": r.adapter, "service": r.service,
-               "family": r.family, "model": r.model, "version": r.version}
+               "family": r.family, "model": r.model, "version": r.version, "effort": r.effort}
               for r in reviewers]
     omissions = [{"path": change["path"], "reason": change["omitted"],
                   "base": change["base"], "worktree": change["worktree"]}

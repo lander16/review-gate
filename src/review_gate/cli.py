@@ -27,6 +27,8 @@ def parser():
         command.add_argument("--reports", type=Path, default=default / "runs")
         command.add_argument("--reviewer", action="append", metavar="PROFILE",
                              help="choose one or two configured reviewer profiles for this run")
+        command.add_argument("--effort", action="append", default=[], metavar="PROFILE=LEVEL",
+                             help="override a selected profile’s effort (repeatable)")
     plan_path = plan.add_mutually_exclusive_group(required=True)
     plan_path.add_argument("file", nargs="?", type=Path, help="proposed plan file")
     plan_path.add_argument("--plan", type=Path, help="proposed plan file (named form)")
@@ -57,8 +59,14 @@ def main(argv=None):
     try:
         root, packet, packet_bytes = capture(args, root)
         packet_hash = digest(packet_bytes)
+        efforts = {}
+        for override in args.effort:
+            name, separator, level = override.partition("=")
+            if not separator or not name or not level or name in efforts:
+                raise GateError("Use --effort PROFILE=LEVEL once per selected profile")
+            efforts[name] = level
         reviewers = load(args.config, root, args.primary_family, primary=args.primary,
-                         phase=args.phase, names=args.reviewer)
+                         phase=args.phase, names=args.reviewer, efforts=efforts)
         private_directory(args.reports, root)
         results = review(reviewers, packet, packet_bytes)
         code = exit_code(results)

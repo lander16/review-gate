@@ -1,5 +1,6 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import re
 import os
 from pathlib import Path
 import tomllib
@@ -20,6 +21,7 @@ class Reviewer:
     model: str
     binary: str
     version: str
+    effort: str | None = None
 
 
 def absolute(value):
@@ -42,7 +44,7 @@ def read_config(path):
         return tomllib.load(source)
 
 
-def route_reviewers(config, root, family, phase="plan", *, names=None):
+def route_reviewers(config, root, family, phase="plan", *, names=None, efforts=None):
     try:
         if names is None:
             route = config["routes"][family]
@@ -57,6 +59,10 @@ def route_reviewers(config, root, family, phase="plan", *, names=None):
         if config.get("mode") != "native" or "launcher" in config:
             raise GateError("Set mode = 'native' and remove legacy launcher and profile fields")
         reviewers = [Reviewer(name, **config["reviewers"][name]) for name in names]
+        efforts = efforts or {}
+        if set(efforts) - {r.name for r in reviewers}:
+            raise GateError("Effort overrides must name selected reviewer profiles")
+        reviewers = [replace(r, effort=efforts.get(r.name, r.effort)) for r in reviewers]
         for reviewer in reviewers:
             if (reviewer.adapter not in ADAPTERS or not absolute(reviewer.binary)
                     or Path(reviewer.binary).resolve().is_relative_to(root)
@@ -66,6 +72,14 @@ def route_reviewers(config, root, family, phase="plan", *, names=None):
                                for value in (reviewer.name, reviewer.service,
                                              reviewer.family, reviewer.model, reviewer.version))):
                 raise GateError("Invalid reviewer configuration")
+            if reviewer.effort is not None:
+                levels = {"codex": {"none", "minimal", "low", "medium", "high", "xhigh", "max"},
+                          "agy": {"low", "medium", "high", "xhigh", "max"},
+                          "claude": {"low", "medium", "high", "xhigh", "max"}}
+                if (not isinstance(reviewer.effort, str)
+                        or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", reviewer.effort)
+                        or (reviewer.adapter != "opencode" and reviewer.effort not in levels[reviewer.adapter])):
+                    raise GateError(f"Invalid effort for reviewer {reviewer.name}")
             if reviewer.adapter == "opencode" and not reviewer.model.startswith("opencode-go/"):
                 raise GateError("OpenCode profiles must pin an OpenCode Go model")
         if len({family.casefold(), *(reviewer.family.casefold() for reviewer in reviewers)}) != len(reviewers) + 1:
@@ -104,10 +118,10 @@ def primary_family(config, primary, family):
     return family
 
 
-def load(path, root, family=None, *, primary=None, phase="plan", names=None):
+def load(path, root, family=None, *, primary=None, phase="plan", names=None, efforts=None):
     config = read_config(config_path(path, root))
     family = primary_family(config, primary, family)
-    reviewers = route_reviewers(config, root, family, phase, names=names)
+    reviewers = route_reviewers(config, root, family, phase, names=names, efforts=efforts)
     approved = approved_services(config, root)
     required = {r.service for r in reviewers}
     if not required.issubset(approved):

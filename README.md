@@ -148,3 +148,14 @@ Each selected reviewer must come from a different model family than the primary 
 - Native mode relies on CLI tool restrictions and has no OS-level filesystem or network allowlist. Antigravity uses its normal login and may write session state in its usual directories. Keep the config and reports outside the reviewed repo. Stronger isolation is tracked in [issue #1](https://github.com/lander16/review-gate/issues/1).
 
 To run the offline tests from the checkout, use `uv run --extra test pytest -q`.
+
+Reviewer profiles may set an optional `effort` string. For a single run, use
+`--effort PROFILE=LEVEL` once per selected reviewer, for example
+`review-gate plan plan.md --effort gemini-agy=high --effort claude-agy=medium`.
+The override applies to the named profile and does not change the saved config.
+Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; Claude and
+Antigravity accept `low`, `medium`, `high`, `xhigh`, and `max`. OpenCode passes
+its value as a provider-specific `--variant`; available variants depend on the
+model. The reviewer CLI may impose further model-specific restrictions. When
+effort is omitted, the adapter retains its prior default behavior. Reports record
+the requested effective effort, or `null` when no effort was specified.

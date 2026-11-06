@@ -83,13 +83,15 @@ def run_process(argv, payload, cwd, timeout=TIMEOUT, cancelled=None, extra_env=N
 
 def command(reviewer, prompt, directory):
     model = reviewer.model
+    effort = reviewer.effort
     if reviewer.adapter == "codex":
         schema = directory / "schema.json"
         schema.write_text(SCHEMA)
         output = directory / "response.json"
         return ["exec", "--ignore-user-config", "--ignore-rules", "--ephemeral",
                 "--skip-git-repo-check", "--sandbox", "read-only", "-c",
-                'approval_policy="never"', "--model", model, "--json",
+                'approval_policy="never"', *(["-c", f'model_reasoning_effort="{effort}"'] if effort else []),
+                "--model", model, "--json",
                 "--output-schema", str(schema), "--output-last-message", str(output),
                 "-"], prompt, output
     if reviewer.adapter == "agy":
@@ -105,13 +107,14 @@ def command(reviewer, prompt, directory):
         return ["--settings", json.dumps(settings), "--disable-slash-commands",
                 "--log-file", str(directory / "agy.log"), "--model", model, "--input-format",
                 "stream-json", "--output-format", "stream-json",
-                "--json-schema", SCHEMA], (json.dumps(message) + "\n").encode(), None
+                "--json-schema", SCHEMA, *(["--effort", effort] if effort else [])], (json.dumps(message) + "\n").encode(), None
     if reviewer.adapter == "claude":
         return ["-p", "--safe-mode", "--tools", "", "--disallowedTools", "mcp__*",
                 "--no-session-persistence",
                 "--output-format", "json", "--json-schema", SCHEMA,
-                "--model", model], prompt, None
-    return ["run", "--model", model, "--format", "json"], prompt, None
+                "--model", model, *(["--effort", effort] if effort else [])], prompt, None
+    return ["run", "--model", model, "--format", "json",
+            *(["--variant", effort] if effort else [])], prompt, None
 
 
 def unique_object(pairs):
