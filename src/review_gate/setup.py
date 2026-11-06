@@ -140,10 +140,12 @@ def configure(args, cwd):
     for phase, pair in pairs.items():
         print(f"{phase}:")
         for reviewer in pair:
+            effort = f", effort {reviewer.effort}" if reviewer.effort else ""
             print(f"  {reviewer.name}: {reviewer.model} via {reviewer.service} "
-                  f"({reviewer.adapter} {reviewer.version})")
+                  f"({reviewer.adapter} {reviewer.version}{effort})")
     for reviewer in alternatives:
-        print(f"Optional reviewer {reviewer.name}: {reviewer.model} via {reviewer.service}")
+        effort = f", effort {reviewer.effort}" if reviewer.effort else ""
+        print(f"Optional reviewer {reviewer.name}: {reviewer.model} via {reviewer.service}{effort}")
     print(f"Saved {path}")
     if not required.issubset(approved):
         flags = [flag for service in sorted(required) for flag in ("--allow", service)]

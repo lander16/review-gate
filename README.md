@@ -151,7 +151,7 @@ To run the offline tests from the checkout, use `uv run --extra test pytest -q`.
 
 Reviewer profiles may set an optional `effort` string. For a single run, use
 `--effort PROFILE=LEVEL` once per selected reviewer, for example
-`review-gate plan plan.md --effort gemini-agy=high --effort claude-agy=medium`.
+`review-gate plan plan.md --primary codex --reviewer gemini-agy --reviewer claude-agy --effort gemini-agy=high --effort claude-agy=medium`.
 The override applies to the named profile and does not change the saved config.
 Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; Claude and
 Antigravity accept `low`, `medium`, `high`, `xhigh`, and `max`. OpenCode passes
